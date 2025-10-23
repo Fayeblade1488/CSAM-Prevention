@@ -326,8 +326,9 @@ class CSAMGuard:
                 try:
                     if now - datetime.fromisoformat(data["added"]) > ttl:
                         expired.append(term)
-                except Exception:
-                    expired.append(term)
+                except (KeyError, ValueError, TypeError) as e:
+                    # Log the error but don't delete the term - it might be recoverable
+                    self.logger.warning(f"Invalid timestamp for pending term '{term}' in {category}: {e}. Skipping expiry check.")
             for term in expired:
                 del self.config["pending_terms"][category][term]
                 self.pending_term_counts.pop(term, None)
