@@ -1,0 +1,26 @@
+version: 2
+updates:
+  
+  # Enable version updates for Python (pip)
+  - package-ecosystem: "pip"
+    directory: "/" # Location of pyproject.toml
+    schedule:
+      interval: "weekly"
+
+  # Enable version updates for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/" # Checks .github/workflows
+    schedule:
+      interval: "weekly"
+
+  # Enable version updates for Docker
+  - package-ecosystem: "docker"
+    directory: "/" # Location of docker-compose.yml
+    schedule:
+      interval: "weekly"
+      
+  # Enable version updates for Helm charts
+  - package-ecosystem: "helm"
+    directory: "/charts/csam-guard" # Location of your Chart.yaml
+    schedule:
+      interval: "weekly"
