@@ -1,8 +1,6 @@
 """Test to demonstrate the perceptual hash bug."""
-import pytest
 from csam_guard.guard import CSAMGuard, DEFAULT_CONFIG
 from PIL import Image
-import numpy as np
 
 
 def test_phash_should_use_64_bits():
@@ -24,9 +22,7 @@ def test_phash_should_use_64_bits():
         phash = guard._compute_phash(img)
         test_cases.append((color, phash))
     
-    # Check if any hash has the MSB set (bit 63)
-    max_63_bit = 2**63 - 1
-    
+    # Check hash values are within expected range
     for color, phash in test_cases:
         # If the implementation is correct and uses full 64 bits,
         # we should occasionally see hashes >= 2^63
@@ -79,14 +75,14 @@ def test_phash_different_images():
     
     # Test with images that have actual content/patterns
     # Create a checkerboard pattern
-    import numpy as np
-    arr1 = np.zeros((100, 100, 3), dtype=np.uint8)
+    import numpy
+    arr1 = numpy.zeros((100, 100, 3), dtype=numpy.uint8)
     arr1[::2, ::2] = 255  # White squares
     arr1[1::2, 1::2] = 255
     img_pattern1 = Image.fromarray(arr1)
     
     # Create a different pattern (stripes)
-    arr2 = np.zeros((100, 100, 3), dtype=np.uint8)
+    arr2 = numpy.zeros((100, 100, 3), dtype=numpy.uint8)
     arr2[:, ::2] = 255  # Vertical stripes
     img_pattern2 = Image.fromarray(arr2)
     

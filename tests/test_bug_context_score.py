@@ -1,5 +1,4 @@
 """Test to demonstrate the context score bug with adult age assertions."""
-import pytest
 from csam_guard.guard import CSAMGuard, DEFAULT_CONFIG
 
 

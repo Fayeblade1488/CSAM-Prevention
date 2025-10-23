@@ -3,7 +3,6 @@ import pytest
 from csam_guard.guard import CSAMGuard, DEFAULT_CONFIG, Decision, Metrics, RateLimiter
 from PIL import Image
 import io
-import numpy as np
 
 
 @pytest.fixture
