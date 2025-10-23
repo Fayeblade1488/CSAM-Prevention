@@ -178,7 +178,7 @@ class Metrics:
         return {"total": self.total_requests, "blocks": self.blocks, "allows": self.allows, "block_rate": self.blocks / max(1, self.total_requests), "top_reasons": dict(self.block_reasons.most_common(5)), "severity": dict(self.severity_counts)}
 
 class RateLimiter:
-    """A simple in-memory rate limiter."""
+    """A thread-safe in-memory rate limiter."""
     def __init__(self, max_requests: int, window: int):
         """Initializes the RateLimiter.
 
@@ -186,11 +186,17 @@ class RateLimiter:
             max_requests: The maximum number of requests allowed in the window.
             window: The time window in seconds.
         """
+        from threading import Lock
         self.requests = defaultdict(list)
         self.max_requests = max_requests
         self.window = window
+        self.lock = Lock()
+    
     def check(self, user_id: str) -> bool:
         """Checks if a user has exceeded the rate limit.
+        
+        Thread-safe implementation that prevents race conditions in
+        concurrent environments like FastAPI.
 
         Args:
             user_id: The identifier for the user.
@@ -198,12 +204,32 @@ class RateLimiter:
         Returns:
             True if the request is allowed, False otherwise.
         """
-        now = time()
-        self.requests[user_id] = [t for t in self.requests[user_id] if now - t < self.window]
-        if len(self.requests[user_id]) >= self.max_requests:
-            return False
-        self.requests[user_id].append(now)
-        return True
+        with self.lock:
+            now = time()
+            # Clean up old requests
+            self.requests[user_id] = [t for t in self.requests[user_id] if now - t < self.window]
+            # Check if limit exceeded
+            if len(self.requests[user_id]) >= self.max_requests:
+                return False
+            # Record this request
+            self.requests[user_id].append(now)
+            # Cleanup old user entries to prevent memory leak
+            if len(self.requests) > 10000:
+                self._cleanup_old_entries(now)
+            return True
+    
+    def _cleanup_old_entries(self, now: float):
+        """Remove users who haven't made requests recently to prevent memory leak.
+        
+        Args:
+            now: Current timestamp for cleanup calculation.
+        """
+        to_remove = [
+            uid for uid, times in self.requests.items()
+            if not times or now - times[-1] > self.window * 2
+        ]
+        for uid in to_remove:
+            del self.requests[uid]
 
 class CSAMGuard:
     """The main class for the CSAM Guard service."""

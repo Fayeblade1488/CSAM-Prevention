@@ -7,6 +7,7 @@ CSAMGuard instance.
 """
 from __future__ import annotations
 import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, File, UploadFile, Depends, Request, status
 from pydantic import BaseModel
 from .guard import CSAMGuard, DEFAULT_CONFIG, RateLimiter, ALLOWED_IMAGE_CT
@@ -16,19 +17,17 @@ PROMETHEUS_ENABLED = os.getenv("PROMETHEUS_ENABLED", "0") == "1"
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "10000000"))
 HTTP_PORT = int(os.getenv("HTTP_PORT", "8000"))
 
-app = FastAPI(title="CSAM Guard API")
-app.state.limiter = RateLimiter(
-    DEFAULT_CONFIG["rate_limit_max"], DEFAULT_CONFIG["rate_limit_window"]
-)
-app.state.max_upload_size = MAX_UPLOAD_BYTES
-
-if PROMETHEUS_ENABLED:
-    app.mount("/metrics", make_asgi_app())
-
-@app.on_event("startup")
-async def startup_event():
-    """Initializes the CSAMGuard instance at application startup."""
-    # Allow reading known hashes from file path if provided
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manages the application lifespan (startup and shutdown).
+    
+    Initializes the CSAMGuard instance at startup and loads any
+    known hashes from the configured file path.
+    
+    Args:
+        app: The FastAPI application instance.
+    """
+    # Startup
     hash_path = os.getenv("HASH_LIST_PATH")
     conf = DEFAULT_CONFIG.copy()
     if hash_path and os.path.exists(hash_path):
@@ -41,6 +40,19 @@ async def startup_event():
         except Exception:
             pass
     app.state.guard = CSAMGuard(conf)
+    app.state.limiter = RateLimiter(
+        DEFAULT_CONFIG["rate_limit_max"], DEFAULT_CONFIG["rate_limit_window"]
+    )
+    app.state.max_upload_size = MAX_UPLOAD_BYTES
+    
+    yield
+    
+    # Shutdown (cleanup if needed)
+
+app = FastAPI(title="CSAM Guard API", lifespan=lifespan)
+
+if PROMETHEUS_ENABLED:
+    app.mount("/metrics", make_asgi_app())
 
 def check_rate_limit(request: Request):
     """Checks if the client has exceeded the rate limit.
