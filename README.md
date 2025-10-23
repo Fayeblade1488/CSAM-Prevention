@@ -20,23 +20,25 @@ CSAM Guard is a production-oriented API designed to detect and prevent child-saf
 
 ### Prerequisites
 
--   Python 3.11+
--   Docker and Docker Compose (for containerized deployment)
+-   Python 3.10, 3.11, or 3.12 (3.11+ recommended)
+-   Docker and Docker Compose (optional, for containerized deployment)
+-   pip and virtualenv (for local development)
 
 ### Installation
 
 1.  **Clone the repository**:
     ```bash
-    git clone https://github.com/your-username/csam-guard.git
-    cd csam-guard
+    git clone https://github.com/Fayeblade1488/CSAM-Prevention.git
+    cd CSAM-Prevention
     ```
 
-2.  **Set up the environment**:
+2.  **Set up the environment** (if you have a .env.sample file):
     ```bash
     cp .env.sample .env
+    # Edit .env to configure your settings
     ```
 
-3.  **Run with Docker Compose**:
+3.  **Run with Docker Compose** (recommended for production):
     ```bash
     docker compose up --build
     ```
@@ -107,7 +109,28 @@ curl -X POST "http://localhost:8000/assess_image" \
 
 ## Configuration
 
-For a complete list of configurable settings, see the `.env.sample` file.
+The system can be configured through environment variables:
+
+### Core Settings
+
+-   `DISABLE_NLP`: Set to `"1"` to disable NLP classification and use heuristics only (default: `"0"`)
+-   `PROMETHEUS_ENABLED`: Set to `"1"` to enable Prometheus metrics (default: `"0"`)
+-   `HTTP_PORT`: Port for the HTTP server (default: `8000`)
+-   `MAX_UPLOAD_BYTES`: Maximum upload size for images (default: `10000000` bytes)
+-   `TRUST_XFF`: Set to `"1"` to trust X-Forwarded-For headers for rate limiting (default: `"0"`)
+-   `HASH_LIST_PATH`: Path to a JSON file containing known CSAM perceptual hashes
+
+### Advanced Configuration
+
+The `DEFAULT_CONFIG` in `src/csam_guard/guard.py` contains many configuration options including:
+
+-   **Term lists**: `hard_terms`, `ambiguous_youth`, `adult_assertions`
+-   **Thresholds**: `context_threshold`, `nlp_threshold`, `phash_match_thresh`
+-   **Rate limiting**: `rate_limit_max`, `rate_limit_window`
+-   **RSS feeds**: List of URLs for term updates
+-   **NLP model**: `nlp_model_name` and `nlp_model_version`
+
+For a complete list of configurable settings, consult the `DEFAULT_CONFIG` dictionary in the source code.
 
 ## Deployment
 
@@ -118,6 +141,45 @@ Simplified Kubernetes manifests are available in the `k8s/` directory. For produ
 ### Known Hashes
 
 The `data/known_hashes.json` file should be populated with hex-encoded 64-bit perceptual hashes of known CSAM content. This file should be treated as sensitive and mounted as a secret in production environments.
+
+## Testing
+
+The project includes a comprehensive test suite with over 55 tests covering:
+
+-   Text assessment with various edge cases
+-   Image assessment and perceptual hashing
+-   Rate limiting
+-   API endpoints
+-   Configuration validation
+-   Bug regression tests
+
+To run the tests:
+
+```bash
+# Install development dependencies
+pip install -e ".[dev]"
+
+# Run all tests
+pytest
+
+# Run tests with coverage report
+pytest --cov=csam_guard --cov-report=term
+
+# Run specific test file
+pytest tests/test_text.py -v
+```
+
+Current test coverage: **82%**
+
+## Contributing
+
+Contributions are welcome! Please ensure:
+
+1.  All tests pass: `pytest`
+2.  Code is linted: `ruff check src/ tests/`
+3.  Code is formatted: `ruff format src/ tests/`
+4.  Type checking passes: `mypy src/`
+5.  Test coverage is maintained or improved
 
 ## License
 

@@ -6,7 +6,13 @@ structures for decisions and metrics, a rate limiter, and various helper
 functions for text normalization, term matching, and image hashing.
 """
 from __future__ import annotations
-import re, json, unicodedata, hashlib, base64, os, uuid, logging
+import re
+import json
+import unicodedata
+import hashlib
+import os
+import uuid
+import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Set, Pattern, Tuple
 from dataclasses import dataclass, asdict, field
@@ -15,7 +21,8 @@ from time import time
 from functools import lru_cache
 from io import BytesIO
 
-import requests, feedparser
+import requests
+import feedparser
 import numpy as np
 from scipy.fft import dct
 from PIL import Image, ImageFile, ImageOps
@@ -232,6 +239,13 @@ class CSAMGuard:
             raise ValueError(f"Config missing keys: {missing}")
 
     def _load_nlp_model(self):
+        """Loads the NLP model for text classification.
+        
+        This method attempts to load the transformers-based NLP model specified
+        in the configuration. If NLP is disabled via environment variable or if
+        the transformers library is not installed, the classifier is set to None
+        and the system falls back to heuristic-only detection.
+        """
         # allow disabling NLP entirely (useful for tests/airgapped)
         if os.getenv("DISABLE_NLP", "0") == "1":
             self.classifier = None
@@ -288,7 +302,8 @@ class CSAMGuard:
             csam_requests_total.labels(endpoint="update_terms").inc()
         now = datetime.now()
         ttl = timedelta(hours=self.config["pending_ttl_hours"])
-        new_hard = set(); new_ambi = set()
+        new_hard = set()
+        new_ambi = set()
         for feed_url in self.config["rss_feeds"]:
             try:
                 response = requests.get(feed_url, timeout=(5,10), headers={"User-Agent":"csam-guard/14.1 (+https://example.org)"})
@@ -318,8 +333,9 @@ class CSAMGuard:
                 try:
                     if now - datetime.fromisoformat(data["added"]) > ttl:
                         expired.append(term)
-                except Exception:
-                    expired.append(term)
+                except (KeyError, ValueError, TypeError) as e:
+                    # Log the error but don't delete the term - it might be recoverable
+                    self.logger.warning(f"Invalid timestamp for pending term '{term}' in {category}: {e}. Skipping expiry check.")
             for term in expired:
                 del self.config["pending_terms"][category][term]
                 self.pending_term_counts.pop(term, None)
@@ -333,8 +349,10 @@ class CSAMGuard:
                     if PROMETHEUS_ENABLED:
                         csam_rss_terms_total.labels(category=category).inc()
                         csam_rss_term_churn.labels(action="added", category=category).inc()
-                    if category == "hard_terms": new_hard.add(term)
-                    else: new_ambi.add(term)
+                    if category == "hard_terms":
+                        new_hard.add(term)
+                    else:
+                        new_ambi.add(term)
         if new_hard or new_ambi:
             self.hard_terms_re = self._build_term_regex(self.config["hard_terms"] + list(self.config["pending_terms"]["hard_terms"]))
             self.ambi_terms_re = self._build_term_regex(self.config["ambiguous_youth"] + list(self.config["pending_terms"]["ambiguous_youth"]))
@@ -342,9 +360,33 @@ class CSAMGuard:
             self.logger.info(f"Updated terms: {len(new_hard)} hard, {len(new_ambi)} ambiguous.")
 
     def _fold_homoglyphs(self, s: str) -> str:
+        """Replaces homoglyph characters with their standard equivalents.
+        
+        Args:
+            s: The string to process.
+            
+        Returns:
+            A string with homoglyphs replaced by standard characters.
+        """
         return "".join(self.config["homoglyph_map"].get(ch, ch) for ch in s)
 
     def _normalize_text(self, s: str) -> str:
+        """Normalizes text for consistent analysis.
+        
+        Performs multiple normalization steps including:
+        - Removing zero-width characters and combining marks
+        - Converting homoglyphs to standard characters
+        - Unicode normalization (NFKC)
+        - Leet speak conversion (0 -> o, 1 -> i, etc.)
+        - Repeated character reduction
+        - Whitespace normalization and lowercasing
+        
+        Args:
+            s: The text to normalize.
+            
+        Returns:
+            The normalized text.
+        """
         s = s.strip().replace("\u2028"," ").replace("\u2029"," ")
         s = ZERO_WIDTH_RE.sub("", s)
         s = self._fold_homoglyphs(s)
@@ -356,9 +398,25 @@ class CSAMGuard:
         return s
 
     def _squash_internals(self, s: str) -> str:
+        """Removes non-word characters between word characters to detect obfuscated terms.
+        
+        Args:
+            s: The text to process.
+            
+        Returns:
+            Text with internal non-word characters removed.
+        """
         return NONWORD_BETWEEN_LETTERS.sub("", s)
 
     def _deobfuscate(self, s: str) -> str:
+        """Removes all whitespace to detect spaced-out obfuscated terms.
+        
+        Args:
+            s: The text to process.
+            
+        Returns:
+            Text with whitespace removed.
+        """
         return WHITESPACE_RE.sub("", s)
 
     def _normalize_for_adult_typos(self, s: str) -> str:
@@ -371,6 +429,17 @@ class CSAMGuard:
         return " ".join(out)
 
     def _words_to_int(self, phrase: str) -> Optional[int]:
+        """Converts spelled-out numbers to integers.
+        
+        Handles numbers from zero to ninety-nine, including compound numbers
+        like "twenty one".
+        
+        Args:
+            phrase: The phrase containing a spelled-out number.
+            
+        Returns:
+            The integer value, or None if the phrase can't be converted.
+        """
         NUMBER_UNITS = {"zero":0,"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,"eight":8,"nine":9,"ten":10,"eleven":11,"twelve":12,"thirteen":13,"fourteen":14,"fifteen":15,"sixteen":16,"seventeen":17,"eighteen":18,"nineteen":19}
         NUMBER_TENS = {"twenty":20,"thirty":30,"forty":40,"fifty":50,"sixty":60,"seventy":70,"eighty":80,"ninety":90}
         parts = phrase.lower().split()
@@ -493,8 +562,10 @@ class CSAMGuard:
                 if len(w) <= 32:
                     windows.add(w)
         risky = self.risk_cache
-        n = self.config["ngram_size"]; h = self.config["hash_bits"]
-        ht = self.config["hamming_thresh"]; jt = self.config["jaccard_thresh"]
+        n = self.config["ngram_size"]
+        h = self.config["hash_bits"]
+        ht = self.config["hamming_thresh"]
+        jt = self.config["jaccard_thresh"]
         for w in windows:
             sh = self._simhash(w, n, h)
             sx = self._soundex(w)
@@ -630,7 +701,8 @@ class CSAMGuard:
         has_hard = bool(signals["hard_terms"] or signals["injections"])
         has_minor_age = any(a < 18 for a in signals["ages"])
         if has_hard or has_minor_age:
-            severity = self._determine_severity(signals); signals["severity"] = severity
+            severity = self._determine_severity(signals)
+            signals["severity"] = severity
             return Decision(allow=False, action="BLOCK", reason=f"Direct violation (severity: {severity})", normalized_prompt=signals["normalized"], signals={k: sorted(v) if isinstance(v, set) else v for k, v in signals.items()})
         has_ambig = bool(
             signals["ambiguous_youth"]
@@ -642,16 +714,20 @@ class CSAMGuard:
             if self._validate_adult_assertion(signals):
                 return Decision(allow=True, action="ALLOW", reason="Valid adult assertion with ambiguous terms", normalized_prompt=signals["normalized"], signals={k: sorted(v) if isinstance(v, set) else v for k, v in signals.items()})
             else:
-                severity = self._determine_severity(signals); signals["severity"] = severity
+                severity = self._determine_severity(signals)
+                signals["severity"] = severity
                 return Decision(allow=False, action="BLOCK", reason=f"Ambiguous youth context without valid adult assertion (severity: {severity})", normalized_prompt=signals["normalized"], signals={k: sorted(v) if isinstance(v, set) else v for k, v in signals.items()})
-        sp = self._second_pass_detect(signals["normalized"]); signals.update(sp)
+        sp = self._second_pass_detect(signals["normalized"])
+        signals.update(sp)
         score = self._context_score(signals)
         is_nsfw = False
         if score <= self.config["context_threshold"] and not sp["second_pass"]:
             is_nsfw = self._flagged_by_nlp(signals["normalized"])
-        signals["nlp_flagged"] = is_nsfw; signals["context_score"] = score
+        signals["nlp_flagged"] = is_nsfw
+        signals["context_score"] = score
         if score > self.config["context_threshold"] or sp["second_pass"] or is_nsfw:
-            severity = self._determine_severity(signals); signals["severity"] = severity
+            severity = self._determine_severity(signals)
+            signals["severity"] = severity
             return Decision(allow=False, action="BLOCK", reason=f"High risk (score: {score}, NLP: {is_nsfw}, second_pass: {len(sp['second_pass'])})", normalized_prompt=signals["normalized"], signals={k: sorted(v) if isinstance(v, set) else v for k, v in signals.items()})
         return Decision(allow=True, action="ALLOW", reason="No minor risk detected", normalized_prompt=signals["normalized"], signals={k: sorted(v) if isinstance(v, set) else v for k, v in signals.items()})
 
@@ -687,14 +763,16 @@ class CSAMGuard:
         """
         if PROMETHEUS_ENABLED:
             csam_requests_total.labels(endpoint="assess").inc()
-        ts = datetime.now().isoformat(); request_id = uuid.uuid4().hex
+        ts = datetime.now().isoformat()
+        request_id = uuid.uuid4().hex
         signals = self._extract_signals(prompt, verbose)
         decision = self._make_decision(signals)
         if decision.allow and do_fun_rewrite:
             decision.rewritten_prompt = self.fun_rewrite(signals["normalized"])
         if log_func:
             log_func(ts, request_id, prompt, signals["normalized"], decision.action, decision.reason, log_path, self.logger)
-        self._api_log(decision); return decision
+        self._api_log(decision)
+        return decision
 
     def _compute_phash(self, img: Image.Image) -> int:
         """Computes the perceptual hash of an image.
@@ -746,7 +824,6 @@ class CSAMGuard:
         """
         if PROMETHEUS_ENABLED:
             csam_requests_total.labels(endpoint="assess_image").inc()
-        ts = datetime.now().isoformat(); request_id = uuid.uuid4().hex
         normalized = image_path if image_path else "uploaded_image"
         if not image_path and not image_data:
             raise ValueError("Provide either image_path or image_data.")
@@ -757,10 +834,12 @@ class CSAMGuard:
                 img = Image.open(BytesIO(image_data))
         except Image.DecompressionBombError:
             decision = Decision(allow=False, action="BLOCK", reason="Image exceeds decompression limits", normalized_prompt=normalized, signals={"error":"DecompressionBombError"})
-            self._api_log(decision); return decision
+            self._api_log(decision)
+            return decision
         except Exception as e:
             decision = Decision(allow=False, action="BLOCK", reason=f"Image processing error: {str(e)}", normalized_prompt=normalized, signals={"error":str(e)})
-            self._api_log(decision); return decision
+            self._api_log(decision)
+            return decision
         phash = self._compute_phash(img)
         phash_hex = f"{phash:016x}"
         signals = {"phash": phash_hex, "matches": [], "min_distance": float("inf"), "model": {"name": self.config["nlp_model_name"], "version": self.config["nlp_model_version"]}}
@@ -776,7 +855,8 @@ class CSAMGuard:
             decision = Decision(allow=False, action="BLOCK", reason=f"CSAM image match detected (min hamming distance: {min_dist})", normalized_prompt=normalized, signals=signals)
         else:
             decision = Decision(allow=True, action="ALLOW", reason="No CSAM image match detected", normalized_prompt=normalized, signals=signals)
-        self._api_log(decision); return decision
+        self._api_log(decision)
+        return decision
 
 def log_entry(ts: str, request_id: str, original: str, norm: str, action: str, reason: str, log_path: str, logger: logging.Logger):
     """Logs a decision to a file and the console.
