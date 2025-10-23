@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# Docker
+.dockerignore
+docker-compose.yml
+docker-compose.override.yml
+Dockerfile
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# IDE files
+.idea/
+.vscode/
