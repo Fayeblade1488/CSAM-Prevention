@@ -1,25 +1,29 @@
 VENV ?= .venv
 PY ?= $(VENV)/bin/python
 PIP ?= $(VENV)/bin/pip
-PYTEST ?= $(VENV)/bin/python -m pytest
 
-.PHONY: venv install dev test clean
+.PHONY: venv dev test lint fmt run clean
 
 venv:
 	python3 -m venv $(VENV)
 
-install: venv
-	$(PIP) install -U pip wheel
-	# install runtime deps (and optional extras if you want)
-	$(PIP) install -e .
-
 dev: venv
 	$(PIP) install -U pip wheel
-	$(PIP) install -e ".[dev]"
+	$(PIP) install -e ".[dev]" || $(PIP) install -e .
+	pre-commit install
 
-test: dev
-	# keep src on path for editable installs while guaranteeing venv Python
-	ENV_VAR=1 PYTHONPATH=src DISABLE_NLP=1 $(PYTEST) -q
+test:
+	PYTHONPATH=src DISABLE_NLP=1 $(PY) -m pytest -q
+
+lint:
+	ruff check .
+	mypy --ignore-missing-imports .
+
+fmt:
+	ruff format .
+
+run:
+	$(PY) -m csam_guard.app
 
 clean:
-	rm -rf .venv .pytest_cache build dist *.egg-info
+	rm -rf .venv .pytest_cache dist build *.egg-info

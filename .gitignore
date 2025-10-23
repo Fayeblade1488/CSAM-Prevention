@@ -1,24 +1,48 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
-.Python
-env/
-venv/
-.venv/
-
-# Docker
-.dockerignore
-docker-compose.yml
-docker-compose.override.yml
-Dockerfile
-
-# Build artifacts
+*.egg-info/
+.eggs/
 dist/
 build/
-*.egg-info/
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.venv/
+venv/
 
-# IDE files
-.idea/
-.vscode/
+# Node
+node_modules/
+npm-debug.log*
+yarn.lock
+pnpm-lock.yaml
+
+# Env & local config
+.env
+.env.*
+*.local
+*.secret
+secrets/*.json
+
+# Artifacts
+*.log
+*.tmp
+*.bak
+*.out
+coverage.xml
+
+# Docs
+site/
+docs/_build/

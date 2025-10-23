@@ -101,3 +101,11 @@ def update_terms():
     guard = app.state.guard
     guard.update_terms_from_rss()
     return {"status": "Terms updated"}
+
+def main():
+    """Runs the FastAPI application using uvicorn."""
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=HTTP_PORT)
+
+if __name__ == "__main__":
+    main()

@@ -1,6 +1,0 @@
-apiVersion: v2
-name: csam-guard
-description: CSAM Guard API chart
-type: application
-version: 0.1.0
-appVersion: "14.1.0"
