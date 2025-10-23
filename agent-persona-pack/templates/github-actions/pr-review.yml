@@ -1,0 +1,22 @@
+
+name: pr-review
+on:
+  pull_request:
+    types: [opened, synchronize, edited, ready_for_review]
+permissions:
+  pull-requests: write
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PR Review with LLM
+        uses: YOUR_ORG/llm-action@v1
+        with:
+          endpoint: ${{ secrets.LLM_ENDPOINT }}
+          api_key: ${{ secrets.LLM_API_KEY }}
+          model: YOUR_MODEL
+          system_prompt: ${{ secrets.PR_REVIEWER_SYSTEM_PROMPT }}
+          input_json: ${{ toJson(github.event.pull_request) }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}

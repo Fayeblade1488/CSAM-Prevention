@@ -1,0 +1,28 @@
+{
+  "persona": "PR Reviewer",
+  "system": "<paste system prompt>",
+  "user_task": "<diff or description>",
+  "context": {
+    "repo": "org/repo",
+    "branch": "feature/x",
+    "links": [
+      "https://example/diff"
+    ],
+    "constraints": [
+      "no secrets",
+      "follow contributing.md"
+    ]
+  },
+  "outputs": [
+    "summary",
+    "inline_comments",
+    "risk_notes",
+    "next_steps"
+  ],
+  "definition_of_done": [
+    "CI is green",
+    "tests added/updated",
+    "no secrets/PII",
+    "docs updated"
+  ]
+}

@@ -1,0 +1,33 @@
+version: "3.9"
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    image: csam-guard:14.1.0
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - HASH_LIST_PATH=/app/data/known_hashes.json
+    volumes:
+      - ./data:/app/data:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+  prometheus:
+    image: prom/prometheus:latest
+    ports: ["9090:9090"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on: ["api"]
+  grafana:
+    image: grafana/grafana:latest
+    ports: ["3000:3000"]
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./grafana:/var/lib/grafana/provisioning/dashboards
+    depends_on: ["prometheus"]
