@@ -1,3 +1,10 @@
+"""This module contains the FastAPI application for the CSAM Guard service.
+
+It defines the API endpoints for assessing text and images, as well as for
+health checks, version information, and updating terms from RSS feeds. It also
+handles the application startup logic, including the initialization of the
+CSAMGuard instance.
+"""
 from __future__ import annotations
 import os
 from fastapi import FastAPI, HTTPException, File, UploadFile, Depends, Request, status
@@ -20,6 +27,7 @@ if PROMETHEUS_ENABLED:
 
 @app.on_event("startup")
 async def startup_event():
+    """Initializes the CSAMGuard instance at application startup."""
     # Allow reading known hashes from file path if provided
     hash_path = os.getenv("HASH_LIST_PATH")
     conf = DEFAULT_CONFIG.copy()
@@ -35,6 +43,14 @@ async def startup_event():
     app.state.guard = CSAMGuard(conf)
 
 def check_rate_limit(request: Request):
+    """Checks if the client has exceeded the rate limit.
+
+    Args:
+        request: The incoming request.
+
+    Raises:
+        HTTPException: If the rate limit is exceeded.
+    """
     trust_proxy = os.getenv("TRUST_XFF", "0") == "1"
     user_id = request.client.host
     if trust_proxy:
@@ -46,23 +62,28 @@ def check_rate_limit(request: Request):
 
 @app.get("/health")
 def health():
+    """Returns the health status of the service."""
     return {"status": "ok"}
 
 @app.get("/version")
 def version():
+    """Returns the version of the service and the NLP model."""
     return {"version": "14.1.0", "model": DEFAULT_CONFIG["nlp_model_name"], "model_version": DEFAULT_CONFIG["nlp_model_version"]}
 
 class PromptRequest(BaseModel):
+    """The request model for the /assess endpoint."""
     prompt: str
     do_fun_rewrite: bool = False
     verbose: bool = False
 
 @app.post("/assess", dependencies=[Depends(check_rate_limit)])
 def assess_prompt(req: PromptRequest):
+    """Assesses a text prompt for potential CSAM-related content."""
     return app.state.guard.assess(req.prompt, req.do_fun_rewrite, verbose=req.verbose)
 
 @app.post("/assess_image", dependencies=[Depends(check_rate_limit)])
 async def assess_image_endpoint(request: Request, file: UploadFile = File(...)):
+    """Assesses an image for potential CSAM-related content."""
     if file.content_type not in ALLOWED_IMAGE_CT:
         raise HTTPException(status_code=415, detail="Unsupported media type")
     cl = request.headers.get("content-length")
@@ -76,6 +97,7 @@ async def assess_image_endpoint(request: Request, file: UploadFile = File(...)):
 
 @app.get("/update_terms", dependencies=[Depends(check_rate_limit)])
 def update_terms():
+    """Updates the term lists from the configured RSS feeds."""
     guard = app.state.guard
     guard.update_terms_from_rss()
     return {"status": "Terms updated"}

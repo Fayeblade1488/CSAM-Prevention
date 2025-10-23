@@ -1,31 +1,25 @@
-.PHONY: venv install run test lint docker-build docker-run compose-up compose-down fmt
+VENV ?= .venv
+PY ?= $(VENV)/bin/python
+PIP ?= $(VENV)/bin/pip
+PYTEST ?= $(VENV)/bin/python -m pytest
+
+.PHONY: venv install dev test clean
 
 venv:
-	python3 -m venv .venv
+	python3 -m venv $(VENV)
 
-install:
-	. .venv/bin/activate && pip install -U pip && pip install -e .
+install: venv
+	$(PIP) install -U pip wheel
+	# install runtime deps (and optional extras if you want)
+	$(PIP) install -e .
 
-install-nlp:
-	. .venv/bin/activate && pip install -U pip && pip install -e .[nlp]
+dev: venv
+	$(PIP) install -U pip wheel
+	$(PIP) install -e ".[dev]"
 
-run:
-	uvicorn csam_guard.app:app --host 0.0.0.0 --port $${HTTP_PORT:-8000} --workers 2
+test: dev
+	# keep src on path for editable installs while guaranteeing venv Python
+	ENV_VAR=1 PYTHONPATH=src DISABLE_NLP=1 $(PYTEST) -q
 
-test:
-	pytest
-
-fmt:
-	ruffle install || true
-
-docker-build:
-	docker build -t csam-guard:14.1.0 -f docker/Dockerfile.api .
-
-docker-run:
-	docker run --rm -p 8000:8000 --env-file .env -v $$(pwd)/data:/app/data:ro csam-guard:14.1.0
-
-compose-up:
-	docker compose up --build
-
-compose-down:
-	docker compose down -v
+clean:
+	rm -rf .venv .pytest_cache build dist *.egg-info

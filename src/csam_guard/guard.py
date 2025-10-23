@@ -1,3 +1,10 @@
+"""This module provides the core functionality for the CSAM Guard service.
+
+It includes the `CSAMGuard` class, which is responsible for assessing text and
+images for potential CSAM-related content. The module also defines the data
+structures for decisions and metrics, a rate limiter, and various helper
+functions for text normalization, term matching, and image hashing.
+"""
 from __future__ import annotations
 import re, json, unicodedata, hashlib, base64, os, uuid, logging
 from datetime import datetime, timedelta
@@ -30,14 +37,10 @@ if PROMETHEUS_ENABLED:
 ALLOWED_IMAGE_CT = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 
 # Optional transformers pipeline is gated by env to avoid heavy deps by default
-NLP_ENABLED = os.getenv("NLP_ENABLED", "0") == "1"
-if NLP_ENABLED:
-    try:
-        from transformers import pipeline
-    except Exception as e:
-        pipeline = None
-else:
-    pipeline = None
+try:
+    from transformers import pipeline as _hf_pipeline  # optional
+except Exception:
+    _hf_pipeline = None
 
 # --- Default Configuration ---
 DEFAULT_CONFIG: Dict[str, Any] = {
@@ -123,6 +126,16 @@ TYPO_CLEANUP_RE = re.compile(r"[,.!?;:\"'()\[\]{}]")
 
 @dataclass
 class Decision:
+    """Represents the outcome of a content assessment.
+
+    Attributes:
+        allow: A boolean indicating whether the content is allowed.
+        action: The action taken (e.g., "ALLOW", "BLOCK").
+        reason: A string explaining the reason for the decision.
+        normalized_prompt: The normalized version of the input text.
+        rewritten_prompt: An optional rewritten version of the prompt.
+        signals: A dictionary of signals that contributed to the decision.
+    """
     allow: bool
     action: str
     reason: str
@@ -130,16 +143,19 @@ class Decision:
     rewritten_prompt: Optional[str] = None
     signals: Dict[str, Any] = field(default_factory=dict)
     def to_json(self) -> str:
+        """Serializes the decision to a JSON string."""
         return json.dumps(asdict(self), ensure_ascii=False, separators=(",", ":"))
 
 @dataclass
 class Metrics:
+    """A class to track metrics related to content assessments."""
     total_requests: int = 0
     blocks: int = 0
     allows: int = 0
     block_reasons: Counter = field(default_factory=Counter)
     severity_counts: Counter = field(default_factory=Counter)
     def record(self, decision: Decision):
+        """Records a decision, updating the metrics."""
         self.total_requests += 1
         if decision.allow:
             self.allows += 1
@@ -151,14 +167,30 @@ class Metrics:
             cat = decision.signals.get("severity") or ("ALLOW" if decision.allow else "UNKNOWN")
             csam_decisions_total.labels(action=decision.action, category=cat).inc()
     def summary(self) -> Dict:
+        """Returns a summary of the metrics as a dictionary."""
         return {"total": self.total_requests, "blocks": self.blocks, "allows": self.allows, "block_rate": self.blocks / max(1, self.total_requests), "top_reasons": dict(self.block_reasons.most_common(5)), "severity": dict(self.severity_counts)}
 
 class RateLimiter:
+    """A simple in-memory rate limiter."""
     def __init__(self, max_requests: int, window: int):
+        """Initializes the RateLimiter.
+
+        Args:
+            max_requests: The maximum number of requests allowed in the window.
+            window: The time window in seconds.
+        """
         self.requests = defaultdict(list)
         self.max_requests = max_requests
         self.window = window
     def check(self, user_id: str) -> bool:
+        """Checks if a user has exceeded the rate limit.
+
+        Args:
+            user_id: The identifier for the user.
+
+        Returns:
+            True if the request is allowed, False otherwise.
+        """
         now = time()
         self.requests[user_id] = [t for t in self.requests[user_id] if now - t < self.window]
         if len(self.requests[user_id]) >= self.max_requests:
@@ -167,7 +199,13 @@ class RateLimiter:
         return True
 
 class CSAMGuard:
+    """The main class for the CSAM Guard service."""
     def __init__(self, config: Dict):
+        """Initializes the CSAMGuard instance.
+
+        Args:
+            config: A dictionary containing the configuration for the guard.
+        """
         self._validate_config(config)
         self.config = config
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -187,45 +225,65 @@ class CSAMGuard:
         self.risk_cache: Dict = self._build_risk_cache()
 
     def _validate_config(self, config: Dict):
+        """Validates the configuration dictionary."""
         required = ["hard_terms","ambiguous_youth","adult_assertions","rss_feeds","fuzzy_threshold","context_threshold","professional_terms","sexual_terms","costume_terms","known_csam_phashes","phash_match_thresh","pending_terms","pending_ttl_hours","pending_confirmation_threshold"]
         missing = [k for k in required if k not in config]
         if missing:
             raise ValueError(f"Config missing keys: {missing}")
 
     def _load_nlp_model(self):
-        self.classifier = None
-        if pipeline is None:
+        # allow disabling NLP entirely (useful for tests/airgapped)
+        if os.getenv("DISABLE_NLP", "0") == "1":
+            self.classifier = None
+            self.logger.info("NLP disabled via DISABLE_NLP=1; falling back to heuristics.")
             return
+
         model_name = self.config["nlp_model_name"]
         model_version = self.config["nlp_model_version"]
         self.logger.info(f"Loading NLP model: {model_name} (v{model_version})...")
-        try:
-            self.classifier = pipeline("text-classification", model=model_name)
-            self.logger.info(f"NLP model loaded successfully: {model_name} (v{model_version})")
-        except Exception as e:
-            self.logger.error(f"Failed to load NLP model {model_name} (v{model_version}): {e}")
+
+        if _hf_pipeline is None:
             self.classifier = None
+            self.logger.warning("transformers not installed; NLP disabled; using heuristics only.")
+            return
+
+        try:
+            self.classifier = _hf_pipeline("text-classification", model=model_name)
+            self.logger.info(f"NLP model loaded: {model_name} (v{model_version})")
+        except Exception as e:
+            self.classifier = None
+            self.logger.error(f"Failed to load NLP model {model_name} (v{model_version}): {e}. "
+                              "Proceeding with heuristics only.")
 
     def _compile_pattern_list(self, patterns: List[str]) -> Pattern:
+        """Compiles a list of patterns into a single regex."""
         return re.compile("|".join(f"({p})" for p in patterns), re.IGNORECASE)
 
     @lru_cache(maxsize=32)
     def _build_term_regex_cached(self, terms_tuple: Tuple[str, ...]) -> Pattern:
+        """Builds a regex for a tuple of terms, with caching."""
         terms = list(terms_tuple)
         sorted_terms = sorted(list(set(t.lower() for t in terms)), key=len, reverse=True)
         escaped_terms = [re.escape(term) if re.search(r"\W", term) else r'\b' + re.escape(term) + r'\b' for term in sorted_terms]
         return re.compile("|".join(escaped_terms), re.IGNORECASE)
 
     def _build_term_regex(self, terms: List[str]) -> Pattern:
+        """Builds a regex for a list of terms."""
         return self._build_term_regex_cached(tuple(terms))
 
     def _build_risk_cache(self) -> Dict:
+        """Builds a cache of risky terms and their precomputed hashes."""
         lexicon = sorted(set(self.config["hard_terms"] + self.config["ambiguous_youth"] + list(self.config["pending_terms"]["hard_terms"]) + list(self.config["pending_terms"]["ambiguous_youth"]) + ["under 18","under eighteen","boy","girl","kid"]))
         n = self.config["ngram_size"]
         h = self.config["hash_bits"]
         return {"lexicon": lexicon, "simhash": {t: self._simhash(t, n, h) for t in lexicon}, "soundex": {t: self._soundex(t) for t in lexicon}, "ngrams": {t: self._char_ngrams(t, n) for t in lexicon}}
 
     def update_terms_from_rss(self):
+        """Updates the term lists from RSS feeds.
+
+        This method fetches content from the configured RSS feeds, identifies
+        potential new terms, and adds them to the pending_terms list.
+        """
         if PROMETHEUS_ENABLED:
             csam_requests_total.labels(endpoint="update_terms").inc()
         now = datetime.now()
@@ -340,7 +398,7 @@ class CSAMGuard:
                     if g and g.isdigit():
                         ages.add(int(g))
         # spelled ages short-form
-        spelled = re.compile(r"\b((?:twenty(?:\s+one)?)|(?:nineteen|eighteen|seventeen|sixteen|fifteen|fourteen|thirteen|twelve|eleven|ten|nine|eight|seven|six|five|four|three|two|one|zero))\s*(?:yo|y/o|yrs?\s*old|years?\s*old|-?\s*year\s*old)\b", re.IGNORECASE)
+        spelled = re.compile(r"\b((?:twenty(?:\s+(?:one|two|three|four|five|six|seven|eight|nine))?)|(?:nineteen|eighteen|seventeen|sixteen|fifteen|fourteen|thirteen|twelve|eleven|ten|nine|eight|seven|six|five|four|three|two|one|zero))\s*(?:yo|y/o|yrs?\s*old|years?\s*old|-?\s*year\s*old)\b", re.IGNORECASE)
         for m in spelled.finditer(raw):
             n = self._words_to_int(m.group(1))
             if n is not None:
@@ -478,8 +536,11 @@ class CSAMGuard:
         return has_strong_adult_ctx and has_adult_term
 
     def _flagged_by_nlp(self, prompt: str) -> bool:
-        if not self.classifier:
-            return False
+        if not getattr(self, "classifier", None):
+            # graceful fallback to heuristics
+            hard_count = len(self._find_terms_regex(prompt, self.hard_terms_re))
+            context_count = len(self._find_terms_regex(prompt, self.ambi_terms_re))
+            return hard_count >= 1 and context_count >= 1
         try:
             threshold = self.config["nlp_threshold"]
             result = self.classifier(prompt[:4000])[0]
@@ -571,7 +632,12 @@ class CSAMGuard:
         if has_hard or has_minor_age:
             severity = self._determine_severity(signals); signals["severity"] = severity
             return Decision(allow=False, action="BLOCK", reason=f"Direct violation (severity: {severity})", normalized_prompt=signals["normalized"], signals={k: sorted(v) if isinstance(v, set) else v for k, v in signals.items()})
-        has_ambig = bool(signals["ambiguous_youth"] or signals["school_context"] or signals["cross_sentence"])
+        has_ambig = bool(
+            signals["ambiguous_youth"]
+            or signals["school_context"]
+            or re.search(r"\bschool uniform\b", signals["normalized"])
+            or signals["cross_sentence"]
+        )
         if has_ambig:
             if self._validate_adult_assertion(signals):
                 return Decision(allow=True, action="ALLOW", reason="Valid adult assertion with ambiguous terms", normalized_prompt=signals["normalized"], signals={k: sorted(v) if isinstance(v, set) else v for k, v in signals.items()})
@@ -590,6 +656,14 @@ class CSAMGuard:
         return Decision(allow=True, action="ALLOW", reason="No minor risk detected", normalized_prompt=signals["normalized"], signals={k: sorted(v) if isinstance(v, set) else v for k, v in signals.items()})
 
     def fun_rewrite(self, norm: str) -> str:
+        """Rewrites a normalized prompt with fun replacements.
+
+        Args:
+            norm: The normalized prompt.
+
+        Returns:
+            The rewritten prompt.
+        """
         replacements = self.config["fun_replacements"]
         sorted_keys = sorted(replacements.keys(), key=len, reverse=True)
         import re as _re
@@ -599,6 +673,18 @@ class CSAMGuard:
         return replacer_re.sub(replacer, norm)
 
     def assess(self, prompt: str, do_fun_rewrite: bool = False, log_func: Optional[callable] = None, log_path: Optional[str] = None, verbose: bool = False) -> Decision:
+        """Assesses a text prompt for potential CSAM-related content.
+
+        Args:
+            prompt: The text prompt to assess.
+            do_fun_rewrite: Whether to perform a fun rewrite on the prompt.
+            log_func: An optional function to log the decision.
+            log_path: An optional path to a log file.
+            verbose: Whether to enable verbose logging.
+
+        Returns:
+            A Decision object representing the outcome of the assessment.
+        """
         if PROMETHEUS_ENABLED:
             csam_requests_total.labels(endpoint="assess").inc()
         ts = datetime.now().isoformat(); request_id = uuid.uuid4().hex
@@ -611,6 +697,14 @@ class CSAMGuard:
         self._api_log(decision); return decision
 
     def _compute_phash(self, img: Image.Image) -> int:
+        """Computes the perceptual hash of an image.
+
+        Args:
+            img: The image to hash.
+
+        Returns:
+            The perceptual hash of the image.
+        """
         try:
             try:
                 if getattr(img, "is_animated", False):
@@ -638,6 +732,18 @@ class CSAMGuard:
         return h
 
     def assess_image(self, image_path: Optional[str] = None, image_data: Optional[bytes] = None, log_func: Optional[callable] = None, log_path: Optional[str] = None, verbose: bool = False) -> Decision:
+        """Assesses an image for potential CSAM-related content.
+
+        Args:
+            image_path: The path to the image file.
+            image_data: The image data as a byte string.
+            log_func: An optional function to log the decision.
+            log_path: An optional path to a log file.
+            verbose: Whether to enable verbose logging.
+
+        Returns:
+            A Decision object representing the outcome of the assessment.
+        """
         if PROMETHEUS_ENABLED:
             csam_requests_total.labels(endpoint="assess_image").inc()
         ts = datetime.now().isoformat(); request_id = uuid.uuid4().hex
@@ -673,6 +779,18 @@ class CSAMGuard:
         self._api_log(decision); return decision
 
 def log_entry(ts: str, request_id: str, original: str, norm: str, action: str, reason: str, log_path: str, logger: logging.Logger):
+    """Logs a decision to a file and the console.
+
+    Args:
+        ts: The timestamp of the request.
+        request_id: The unique ID of the request.
+        original: The original prompt.
+        norm: The normalized prompt.
+        action: The action taken.
+        reason: The reason for the action.
+        log_path: The path to the log file.
+        logger: The logger instance.
+    """
     try:
         log_data = {"timestamp": ts,"request_id": request_id,"action": action,"reason": reason,"prompt_hash": hashlib.sha256((original or '').encode()).hexdigest(),"normalized_hash": hashlib.sha256((norm or '').encode()).hexdigest()}
         logger.info(json.dumps(log_data))
