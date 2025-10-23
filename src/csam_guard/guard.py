@@ -420,6 +420,17 @@ class CSAMGuard:
         return WHITESPACE_RE.sub("", s)
 
     def _normalize_for_adult_typos(self, s: str) -> str:
+        """Normalizes text by correcting common typos in adult terms.
+        
+        This function applies a normalization dictionary to correct common
+        misspellings and variations of adult terms (e.g., "boobiies" -> "boobies").
+        
+        Args:
+            s: The text to normalize.
+            
+        Returns:
+            The normalized text with typos corrected.
+        """
         tokens = WORD_SPLIT_RE.split(s)
         out = []
         norm_dict = self.config["adult_normalization"]
@@ -450,6 +461,15 @@ class CSAMGuard:
         return None
 
     def _find_terms_regex(self, text: str, term_re: Pattern) -> Set[str]:
+        """Finds all terms matching the given regex pattern in the text.
+        
+        Args:
+            text: The text to search.
+            term_re: The compiled regex pattern to match.
+            
+        Returns:
+            A set of matched terms in lowercase.
+        """
         matches = term_re.findall(text)
         if not matches:
             return set()
@@ -460,6 +480,18 @@ class CSAMGuard:
         return {m.lower() for m in flat}
 
     def _find_ages(self, raw: str) -> Set[int]:
+        """Finds all age references in text, both numeric and spelled out.
+        
+        Detects ages in various formats:
+        - Numeric: "12 yo", "12 y/o", "12 years old", "age: 12"
+        - Spelled out: "twelve years old", "twelve yo", "twenty one y/o"
+        
+        Args:
+            raw: The text to search for age references.
+            
+        Returns:
+            A set of integer ages found in the text.
+        """
         ages = set()
         for pat in self.age_re_list:
             for m in pat.finditer(raw):
@@ -475,12 +507,45 @@ class CSAMGuard:
         return ages
 
     def _school_context(self, s: str) -> Set[str]:
+        """Finds school-related context in text.
+        
+        Detects mentions of grades, school types, and educational contexts
+        like "kindergarten", "5th grade", "middle school", etc.
+        
+        Args:
+            s: The text to search.
+            
+        Returns:
+            A set of school context matches found in lowercase.
+        """
         return {m.group(0).lower() for m in self.school_re.finditer(s)}
 
     def _check_allowlist(self, s: str) -> bool:
+        """Checks if text contains professional/educational context terms.
+        
+        Searches for terms like "kindergarten teacher", "pediatric nurse",
+        "child psychologist", etc., that indicate legitimate professional use.
+        
+        Args:
+            s: The text to check.
+            
+        Returns:
+            True if allowlist terms are found, False otherwise.
+        """
         return bool(self.allowlist_re.search(s))
 
     def _cross_sentence_detect(self, norm: str) -> Set[str]:
+        """Detects risky terms that span across sentence boundaries.
+        
+        Combines adjacent sentences to catch terms that might be split
+        across sentence boundaries to evade detection.
+        
+        Args:
+            norm: The normalized text to analyze.
+            
+        Returns:
+            A set of hard terms found across sentence boundaries.
+        """
         sentences = SENTENCE_SPLIT_RE.split(norm)
         hits = set()
         for i in range(len(sentences) - 1):
@@ -489,6 +554,17 @@ class CSAMGuard:
         return hits
 
     def _cluster_detection(self, tokens: List[str]) -> int:
+        """Detects risky term clusters in text.
+        
+        Checks if text contains multiple terms from predefined risky clusters
+        (e.g., {"small", "petite", "tiny"} combined with {"girl", "boy"}).
+        
+        Args:
+            tokens: List of word tokens from the text.
+            
+        Returns:
+            A risk score based on cluster matches (3 points per cluster).
+        """
         score = 0
         token_set = set(tokens)
         for cluster in self.config["risky_clusters"]:
@@ -498,6 +574,19 @@ class CSAMGuard:
 
     @lru_cache(maxsize=1024)
     def _simhash(self, text: str, ngram: int, hashbits: int) -> int:
+        """Computes a SimHash fingerprint for fuzzy text matching.
+        
+        SimHash is a locality-sensitive hashing algorithm that produces similar
+        hash values for similar inputs, allowing for approximate string matching.
+        
+        Args:
+            text: The text to hash.
+            ngram: The n-gram size for character-level hashing.
+            hashbits: The number of bits in the hash (typically 64).
+            
+        Returns:
+            An integer hash value representing the text.
+        """
         grams = [text] if len(text) < ngram else [text[i:i+ngram] for i in range(len(text) - ngram + 1)]
         if not grams:
             return 0
@@ -515,21 +604,69 @@ class CSAMGuard:
         return fp
 
     def _hamming64(self, a: int, b: int) -> int:
+        """Calculates the Hamming distance between two integers.
+        
+        The Hamming distance is the number of bit positions in which
+        the two integers differ.
+        
+        Args:
+            a: The first integer.
+            b: The second integer.
+            
+        Returns:
+            The number of differing bits.
+        """
         return bin(a ^ b).count("1")
 
     def _char_ngrams(self, s: str, n: int) -> set:
+        """Generates character n-grams from a string.
+        
+        Pads the string with spaces and generates overlapping n-character
+        subsequences for similarity comparison.
+        
+        Args:
+            s: The input string.
+            n: The size of each n-gram.
+            
+        Returns:
+            A set of n-gram strings.
+        """
         s = f" {s} "
         if len(s) < n:
             return {s}
         return {s[i : i + n] for i in range(len(s) - n + 1)}
 
     def _jaccard(self, set1: set, set2: set) -> float:
+        """Calculates the Jaccard similarity between two sets.
+        
+        The Jaccard similarity is the size of the intersection divided by
+        the size of the union of the sets.
+        
+        Args:
+            set1: The first set.
+            set2: The second set.
+            
+        Returns:
+            A float between 0 and 1 representing the similarity.
+        """
         if not set1 or not set2:
             return 0.0
         return len(set1 & set2) / len(set1 | set2)
 
     @lru_cache(maxsize=512)
     def _soundex(self, s: str) -> str:
+        """Generates a Soundex code for phonetic matching.
+        
+        Soundex is a phonetic algorithm that encodes words based on their
+        pronunciation, allowing matching of words that sound similar but
+        are spelled differently.
+        
+        Args:
+            s: The string to encode.
+            
+        Returns:
+            A 4-character Soundex code (e.g., "S532" for "Smith").
+        """
         s = re.sub(r"[^a-zA-Z]", "", s).upper()
         if not s:
             return "Z000"
@@ -547,11 +684,34 @@ class CSAMGuard:
         return (code + "000")[:4]
 
     def _soundex_match(self, term: str, window: str, min_length: int = 5) -> bool:
+        """Checks if two strings match phonetically using Soundex.
+        
+        Args:
+            term: The reference term.
+            window: The text window to compare.
+            min_length: Minimum length requirement for the window.
+            
+        Returns:
+            True if the strings have matching Soundex codes and meet length criteria.
+        """
         if abs(len(term) - len(window)) > 2:
             return False
         return self._soundex(term) == self._soundex(window) and len(window) >= min_length
 
     def _second_pass_detect(self, norm: str) -> Dict[str, Any]:
+        """Performs fuzzy matching to detect obfuscated or misspelled risky terms.
+        
+        Uses multiple fuzzy matching algorithms (SimHash, Jaccard, Soundex) to
+        detect terms that might have been intentionally obfuscated or misspelled
+        to evade detection.
+        
+        Args:
+            norm: The normalized text to analyze.
+            
+        Returns:
+            A dictionary containing a list of second-pass matches with their
+            match type, matched term, and similarity metrics.
+        """
         signals = {"second_pass": []}
         squashed = self._squash_internals(norm)
         tokens = WORD_SPLIT_RE.split(squashed)
@@ -587,6 +747,17 @@ class CSAMGuard:
         return signals
 
     def _check_professional_context(self, signals: Dict) -> bool:
+        """Determines if content is in a legitimate professional context.
+        
+        Checks if the text contains professional terms (teacher, doctor, etc.)
+        without sexual terms, indicating legitimate professional use.
+        
+        Args:
+            signals: The extracted signals from text analysis.
+            
+        Returns:
+            True if the content appears to be professional/educational, False otherwise.
+        """
         if not signals["allowlisted"]:
             return False
         text = signals["normalized"]
@@ -595,6 +766,18 @@ class CSAMGuard:
         return has_professional and not has_sexual
 
     def _validate_adult_assertion(self, signals: Dict) -> bool:
+        """Validates if adult assertions in the text are credible.
+        
+        Checks if the text contains legitimate adult assertions (18+, adult, etc.)
+        along with supporting context (costume, reunion, age 18+, etc.) and no
+        contradicting minor terms.
+        
+        Args:
+            signals: The extracted signals from text analysis.
+            
+        Returns:
+            True if adult assertions appear credible, False otherwise.
+        """
         has_adult_age = any(a >= 18 for a in signals["ages"])
         has_adult_term = bool(signals["adult_assertions"])
         has_hard_minor = bool(signals["hard_terms"])
@@ -607,6 +790,17 @@ class CSAMGuard:
         return has_strong_adult_ctx and has_adult_term
 
     def _flagged_by_nlp(self, prompt: str) -> bool:
+        """Checks if content is flagged as NSFW by the NLP classifier.
+        
+        Uses a transformer-based NLP model to classify content. Falls back
+        to heuristic detection if the classifier is unavailable.
+        
+        Args:
+            prompt: The text to classify.
+            
+        Returns:
+            True if the content is flagged as NSFW, False otherwise.
+        """
         if not getattr(self, "classifier", None):
             # graceful fallback to heuristics
             hard_count = len(self._find_terms_regex(prompt, self.hard_terms_re))
@@ -626,6 +820,17 @@ class CSAMGuard:
             return hard_count >= 1 and context_count >= 1
 
     def _determine_severity(self, signals: Dict) -> str:
+        """Determines the severity level of detected risky content.
+        
+        Classifies content into severity levels (CRITICAL, HIGH, MEDIUM, LOW)
+        based on the specific terms found.
+        
+        Args:
+            signals: The extracted signals from text analysis.
+            
+        Returns:
+            A string representing the severity level ("CRITICAL", "HIGH", "MEDIUM", "LOW", or "UNKNOWN").
+        """
         all_terms = signals.get("hard_terms", set()) | signals.get("ambiguous_youth", set())
         for level in ["CRITICAL","HIGH","MEDIUM","LOW"]:
             if any(term in all_terms for term in self.config["severity_levels"][level]):
@@ -633,6 +838,27 @@ class CSAMGuard:
         return "UNKNOWN"
 
     def _context_score(self, signals: Dict) -> int:
+        """Calculates a risk score based on all detected signals.
+        
+        Combines various risk factors into a single numerical score:
+        - Hard terms: 5 points each
+        - Ambiguous youth terms: weight-based (1-5 points)
+        - School context: 2 points each
+        - Injections: 6 points each
+        - Minor age: 7 points
+        - Second-pass matches: 3 points each
+        - Cross-sentence matches: 4 points each
+        - Cluster matches: 3 points per cluster
+        
+        Score is reduced by 5 points for valid adult assertions and by
+        allowlist credit for professional context.
+        
+        Args:
+            signals: The extracted signals from text analysis.
+            
+        Returns:
+            An integer risk score (minimum 0).
+        """
         score = 0
         has_explicit_adult_age = any(a >= 18 for a in signals["ages"])
         if has_explicit_adult_age:
@@ -666,11 +892,39 @@ class CSAMGuard:
         return max(0, score)
 
     def _api_log(self, decision: Decision):
+        """Logs a decision to Prometheus metrics if enabled.
+        
+        Args:
+            decision: The Decision object to log.
+        """
         if PROMETHEUS_ENABLED:
             cat = decision.signals.get("severity") or ("ALLOW" if decision.allow else "UNKNOWN")
             csam_decisions_total.labels(action=decision.action, category=cat).inc()
 
     def _extract_signals(self, prompt: str, verbose: bool = False) -> Dict:
+        """Extracts all relevant signals from a text prompt.
+        
+        Performs comprehensive text analysis including normalization, term
+        detection, age extraction, injection detection, and context analysis.
+        
+        Args:
+            prompt: The text prompt to analyze.
+            verbose: Whether to enable verbose debug logging.
+            
+        Returns:
+            A dictionary containing all extracted signals including:
+            - normalized: The normalized text
+            - ages: List of detected ages
+            - hard_terms: Set of hard violation terms found
+            - ambiguous_youth: Set of ambiguous youth terms found
+            - adult_assertions: Set of adult assertion terms found
+            - injections: Set of prompt injection patterns found
+            - school_context: Set of school-related terms found
+            - cross_sentence: Set of cross-sentence detected terms
+            - cluster_score: Risk score from cluster detection
+            - allowlisted: Boolean indicating professional context
+            - model: Model name and version information
+        """
         raw = prompt
         allowlisted = self._check_allowlist(raw)
         ages = self._find_ages(raw)
@@ -696,6 +950,21 @@ class CSAMGuard:
         return signals
 
     def _make_decision(self, signals: Dict) -> Decision:
+        """Makes a final decision based on all extracted signals.
+        
+        Applies decision logic in priority order:
+        1. Professional context - immediate allow
+        2. Hard terms or minor age - immediate block
+        3. Ambiguous youth context - block unless validated adult assertion
+        4. Context score and NLP - block if high risk
+        5. Default - allow
+        
+        Args:
+            signals: The extracted signals from text analysis.
+            
+        Returns:
+            A Decision object representing the final assessment.
+        """
         if self._check_professional_context(signals):
             return Decision(allow=True, action="ALLOW", reason="Legitimate professional/educational context", normalized_prompt=signals["normalized"], signals={k: sorted(v) if isinstance(v, set) else v for k, v in signals.items()})
         has_hard = bool(signals["hard_terms"] or signals["injections"])
