@@ -6,7 +6,13 @@ structures for decisions and metrics, a rate limiter, and various helper
 functions for text normalization, term matching, and image hashing.
 """
 from __future__ import annotations
-import re, json, unicodedata, hashlib, base64, os, uuid, logging
+import re
+import json
+import unicodedata
+import hashlib
+import os
+import uuid
+import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Set, Pattern, Tuple
 from dataclasses import dataclass, asdict, field
@@ -15,7 +21,8 @@ from time import time
 from functools import lru_cache
 from io import BytesIO
 
-import requests, feedparser
+import requests
+import feedparser
 import numpy as np
 from scipy.fft import dct
 from PIL import Image, ImageFile, ImageOps
@@ -288,7 +295,8 @@ class CSAMGuard:
             csam_requests_total.labels(endpoint="update_terms").inc()
         now = datetime.now()
         ttl = timedelta(hours=self.config["pending_ttl_hours"])
-        new_hard = set(); new_ambi = set()
+        new_hard = set()
+        new_ambi = set()
         for feed_url in self.config["rss_feeds"]:
             try:
                 response = requests.get(feed_url, timeout=(5,10), headers={"User-Agent":"csam-guard/14.1 (+https://example.org)"})
@@ -333,8 +341,10 @@ class CSAMGuard:
                     if PROMETHEUS_ENABLED:
                         csam_rss_terms_total.labels(category=category).inc()
                         csam_rss_term_churn.labels(action="added", category=category).inc()
-                    if category == "hard_terms": new_hard.add(term)
-                    else: new_ambi.add(term)
+                    if category == "hard_terms":
+                        new_hard.add(term)
+                    else:
+                        new_ambi.add(term)
         if new_hard or new_ambi:
             self.hard_terms_re = self._build_term_regex(self.config["hard_terms"] + list(self.config["pending_terms"]["hard_terms"]))
             self.ambi_terms_re = self._build_term_regex(self.config["ambiguous_youth"] + list(self.config["pending_terms"]["ambiguous_youth"]))
@@ -493,8 +503,10 @@ class CSAMGuard:
                 if len(w) <= 32:
                     windows.add(w)
         risky = self.risk_cache
-        n = self.config["ngram_size"]; h = self.config["hash_bits"]
-        ht = self.config["hamming_thresh"]; jt = self.config["jaccard_thresh"]
+        n = self.config["ngram_size"]
+        h = self.config["hash_bits"]
+        ht = self.config["hamming_thresh"]
+        jt = self.config["jaccard_thresh"]
         for w in windows:
             sh = self._simhash(w, n, h)
             sx = self._soundex(w)
@@ -630,7 +642,8 @@ class CSAMGuard:
         has_hard = bool(signals["hard_terms"] or signals["injections"])
         has_minor_age = any(a < 18 for a in signals["ages"])
         if has_hard or has_minor_age:
-            severity = self._determine_severity(signals); signals["severity"] = severity
+            severity = self._determine_severity(signals)
+            signals["severity"] = severity
             return Decision(allow=False, action="BLOCK", reason=f"Direct violation (severity: {severity})", normalized_prompt=signals["normalized"], signals={k: sorted(v) if isinstance(v, set) else v for k, v in signals.items()})
         has_ambig = bool(
             signals["ambiguous_youth"]
@@ -642,16 +655,20 @@ class CSAMGuard:
             if self._validate_adult_assertion(signals):
                 return Decision(allow=True, action="ALLOW", reason="Valid adult assertion with ambiguous terms", normalized_prompt=signals["normalized"], signals={k: sorted(v) if isinstance(v, set) else v for k, v in signals.items()})
             else:
-                severity = self._determine_severity(signals); signals["severity"] = severity
+                severity = self._determine_severity(signals)
+                signals["severity"] = severity
                 return Decision(allow=False, action="BLOCK", reason=f"Ambiguous youth context without valid adult assertion (severity: {severity})", normalized_prompt=signals["normalized"], signals={k: sorted(v) if isinstance(v, set) else v for k, v in signals.items()})
-        sp = self._second_pass_detect(signals["normalized"]); signals.update(sp)
+        sp = self._second_pass_detect(signals["normalized"])
+        signals.update(sp)
         score = self._context_score(signals)
         is_nsfw = False
         if score <= self.config["context_threshold"] and not sp["second_pass"]:
             is_nsfw = self._flagged_by_nlp(signals["normalized"])
-        signals["nlp_flagged"] = is_nsfw; signals["context_score"] = score
+        signals["nlp_flagged"] = is_nsfw
+        signals["context_score"] = score
         if score > self.config["context_threshold"] or sp["second_pass"] or is_nsfw:
-            severity = self._determine_severity(signals); signals["severity"] = severity
+            severity = self._determine_severity(signals)
+            signals["severity"] = severity
             return Decision(allow=False, action="BLOCK", reason=f"High risk (score: {score}, NLP: {is_nsfw}, second_pass: {len(sp['second_pass'])})", normalized_prompt=signals["normalized"], signals={k: sorted(v) if isinstance(v, set) else v for k, v in signals.items()})
         return Decision(allow=True, action="ALLOW", reason="No minor risk detected", normalized_prompt=signals["normalized"], signals={k: sorted(v) if isinstance(v, set) else v for k, v in signals.items()})
 
@@ -687,14 +704,16 @@ class CSAMGuard:
         """
         if PROMETHEUS_ENABLED:
             csam_requests_total.labels(endpoint="assess").inc()
-        ts = datetime.now().isoformat(); request_id = uuid.uuid4().hex
+        ts = datetime.now().isoformat()
+        request_id = uuid.uuid4().hex
         signals = self._extract_signals(prompt, verbose)
         decision = self._make_decision(signals)
         if decision.allow and do_fun_rewrite:
             decision.rewritten_prompt = self.fun_rewrite(signals["normalized"])
         if log_func:
             log_func(ts, request_id, prompt, signals["normalized"], decision.action, decision.reason, log_path, self.logger)
-        self._api_log(decision); return decision
+        self._api_log(decision)
+        return decision
 
     def _compute_phash(self, img: Image.Image) -> int:
         """Computes the perceptual hash of an image.
@@ -746,7 +765,6 @@ class CSAMGuard:
         """
         if PROMETHEUS_ENABLED:
             csam_requests_total.labels(endpoint="assess_image").inc()
-        ts = datetime.now().isoformat(); request_id = uuid.uuid4().hex
         normalized = image_path if image_path else "uploaded_image"
         if not image_path and not image_data:
             raise ValueError("Provide either image_path or image_data.")
@@ -757,10 +775,12 @@ class CSAMGuard:
                 img = Image.open(BytesIO(image_data))
         except Image.DecompressionBombError:
             decision = Decision(allow=False, action="BLOCK", reason="Image exceeds decompression limits", normalized_prompt=normalized, signals={"error":"DecompressionBombError"})
-            self._api_log(decision); return decision
+            self._api_log(decision)
+            return decision
         except Exception as e:
             decision = Decision(allow=False, action="BLOCK", reason=f"Image processing error: {str(e)}", normalized_prompt=normalized, signals={"error":str(e)})
-            self._api_log(decision); return decision
+            self._api_log(decision)
+            return decision
         phash = self._compute_phash(img)
         phash_hex = f"{phash:016x}"
         signals = {"phash": phash_hex, "matches": [], "min_distance": float("inf"), "model": {"name": self.config["nlp_model_name"], "version": self.config["nlp_model_version"]}}
@@ -776,7 +796,8 @@ class CSAMGuard:
             decision = Decision(allow=False, action="BLOCK", reason=f"CSAM image match detected (min hamming distance: {min_dist})", normalized_prompt=normalized, signals=signals)
         else:
             decision = Decision(allow=True, action="ALLOW", reason="No CSAM image match detected", normalized_prompt=normalized, signals=signals)
-        self._api_log(decision); return decision
+        self._api_log(decision)
+        return decision
 
 def log_entry(ts: str, request_id: str, original: str, norm: str, action: str, reason: str, log_path: str, logger: logging.Logger):
     """Logs a decision to a file and the console.
