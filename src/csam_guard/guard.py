@@ -239,6 +239,13 @@ class CSAMGuard:
             raise ValueError(f"Config missing keys: {missing}")
 
     def _load_nlp_model(self):
+        """Loads the NLP model for text classification.
+        
+        This method attempts to load the transformers-based NLP model specified
+        in the configuration. If NLP is disabled via environment variable or if
+        the transformers library is not installed, the classifier is set to None
+        and the system falls back to heuristic-only detection.
+        """
         # allow disabling NLP entirely (useful for tests/airgapped)
         if os.getenv("DISABLE_NLP", "0") == "1":
             self.classifier = None
@@ -353,9 +360,33 @@ class CSAMGuard:
             self.logger.info(f"Updated terms: {len(new_hard)} hard, {len(new_ambi)} ambiguous.")
 
     def _fold_homoglyphs(self, s: str) -> str:
+        """Replaces homoglyph characters with their standard equivalents.
+        
+        Args:
+            s: The string to process.
+            
+        Returns:
+            A string with homoglyphs replaced by standard characters.
+        """
         return "".join(self.config["homoglyph_map"].get(ch, ch) for ch in s)
 
     def _normalize_text(self, s: str) -> str:
+        """Normalizes text for consistent analysis.
+        
+        Performs multiple normalization steps including:
+        - Removing zero-width characters and combining marks
+        - Converting homoglyphs to standard characters
+        - Unicode normalization (NFKC)
+        - Leet speak conversion (0 -> o, 1 -> i, etc.)
+        - Repeated character reduction
+        - Whitespace normalization and lowercasing
+        
+        Args:
+            s: The text to normalize.
+            
+        Returns:
+            The normalized text.
+        """
         s = s.strip().replace("\u2028"," ").replace("\u2029"," ")
         s = ZERO_WIDTH_RE.sub("", s)
         s = self._fold_homoglyphs(s)
@@ -367,9 +398,25 @@ class CSAMGuard:
         return s
 
     def _squash_internals(self, s: str) -> str:
+        """Removes non-word characters between word characters to detect obfuscated terms.
+        
+        Args:
+            s: The text to process.
+            
+        Returns:
+            Text with internal non-word characters removed.
+        """
         return NONWORD_BETWEEN_LETTERS.sub("", s)
 
     def _deobfuscate(self, s: str) -> str:
+        """Removes all whitespace to detect spaced-out obfuscated terms.
+        
+        Args:
+            s: The text to process.
+            
+        Returns:
+            Text with whitespace removed.
+        """
         return WHITESPACE_RE.sub("", s)
 
     def _normalize_for_adult_typos(self, s: str) -> str:
@@ -382,6 +429,17 @@ class CSAMGuard:
         return " ".join(out)
 
     def _words_to_int(self, phrase: str) -> Optional[int]:
+        """Converts spelled-out numbers to integers.
+        
+        Handles numbers from zero to ninety-nine, including compound numbers
+        like "twenty one".
+        
+        Args:
+            phrase: The phrase containing a spelled-out number.
+            
+        Returns:
+            The integer value, or None if the phrase can't be converted.
+        """
         NUMBER_UNITS = {"zero":0,"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,"eight":8,"nine":9,"ten":10,"eleven":11,"twelve":12,"thirteen":13,"fourteen":14,"fifteen":15,"sixteen":16,"seventeen":17,"eighteen":18,"nineteen":19}
         NUMBER_TENS = {"twenty":20,"thirty":30,"forty":40,"fifty":50,"sixty":60,"seventy":70,"eighty":80,"ninety":90}
         parts = phrase.lower().split()
