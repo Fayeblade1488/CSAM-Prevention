@@ -20,7 +20,7 @@ CSAM Guard is a production-oriented API designed to detect and prevent child-saf
 
 ### Prerequisites
 
--   Python 3.8+
+-   Python 3.11+
 -   Docker and Docker Compose (for containerized deployment)
 
 ### Installation
