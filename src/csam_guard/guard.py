@@ -632,7 +632,12 @@ class CSAMGuard:
         if has_hard or has_minor_age:
             severity = self._determine_severity(signals); signals["severity"] = severity
             return Decision(allow=False, action="BLOCK", reason=f"Direct violation (severity: {severity})", normalized_prompt=signals["normalized"], signals={k: sorted(v) if isinstance(v, set) else v for k, v in signals.items()})
-        has_ambig = bool(signals["ambiguous_youth"] or signals["school_context"] or "school uniform" in signals["normalized"] or signals["cross_sentence"])
+        has_ambig = bool(
+            signals["ambiguous_youth"]
+            or signals["school_context"]
+            or re.search(r"\bschool uniform\b", signals["normalized"])
+            or signals["cross_sentence"]
+        )
         if has_ambig:
             if self._validate_adult_assertion(signals):
                 return Decision(allow=True, action="ALLOW", reason="Valid adult assertion with ambiguous terms", normalized_prompt=signals["normalized"], signals={k: sorted(v) if isinstance(v, set) else v for k, v in signals.items()})
