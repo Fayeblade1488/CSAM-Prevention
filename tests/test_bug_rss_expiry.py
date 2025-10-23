@@ -1,5 +1,4 @@
 """Test to demonstrate the RSS pending terms expiry bug."""
-import pytest
 from csam_guard.guard import CSAMGuard, DEFAULT_CONFIG
 from datetime import datetime, timedelta
 
