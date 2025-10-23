@@ -7,7 +7,7 @@ name = "csam-guard"
 version = "14.1.0"
 description = "Content safety guard for preventing and detecting child-safety risk signals in text and images."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = {text="MIT"}
 authors = [{name="CSAM Guard Maintainers", email="maintainers@example.org"}]
 dependencies = [
