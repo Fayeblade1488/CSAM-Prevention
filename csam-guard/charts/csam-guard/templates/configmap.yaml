@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ include "csam-guard.fullname" . }}-hashes
-data:
-  known_hashes.json: |
-    { "known_csam_phashes": ["a1b2c3d4e5f6a7b8","b2c3d4e5f6a7b8c9"] }
