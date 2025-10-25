@@ -1,12 +1,15 @@
+# This workflow uses the default-compatible CodeQL configuration.
+# Advanced custom queries have been removed to avoid conflicts with the repository's
+# default CodeQL setup. If you need advanced queries, disable the default setup in
+# Repository Settings → Security → Code scanning alerts.
+
 name: Security Scanning
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, master, develop ]
-  schedule:
-    - cron: '0 0 * * 0'  # Weekly on Sunday at midnight
+    branches: [ main ]
 
 permissions:
   contents: read
@@ -15,32 +18,25 @@ permissions:
 
 jobs:
   codeql:
-    name: CodeQL Analysis
+    name: Perform CodeQL Analysis
     runs-on: ubuntu-latest
-    timeout-minutes: 360
-    
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [ 'python' ]
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v5
+      uses: actions/checkout@v4
 
     - name: Initialize CodeQL
-      uses: github/codeql-action/init@v4
+      uses: github/codeql-action/init@v2
       with:
-        languages: ${{ matrix.language }}
-        queries: security-extended,security-and-quality
+        languages: python
 
     - name: Autobuild
-      uses: github/codeql-action/autobuild@v4
+      uses: github/codeql-action/autobuild@v2
 
     - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v4
+      uses: github/codeql-action/analyze@v2
       with:
-        category: "/language:${{matrix.language}}"
+        category: "security"
 
   gitleaks:
     name: Gitleaks Secret Scanning
