@@ -19,7 +19,13 @@ dev: venv
 
 test: dev
 	# keep src on path for editable installs while guaranteeing venv Python
-	ENV_VAR=1 PYTHONPATH=src DISABLE_NLP=1 $(PYTEST) -q
+	ENV_VAR=1 PYTHONPATH=src DISABLE_NLP=1 $(PYTEST) --cov=src --cov-report=term-missing -q
+
+lint: dev
+	@if [ ! -x "$(VENV)/bin/ruff" ]; then echo "Error: ruff is not installed in $(VENV). Run 'make dev' to install dev dependencies."; exit 1; fi
+	@if [ ! -x "$(VENV)/bin/mypy" ]; then echo "Error: mypy is not installed in $(VENV). Run 'make dev' to install dev dependencies."; exit 1; fi
+	$(VENV)/bin/ruff check src tests
+	$(VENV)/bin/mypy src
 
 clean:
 	rm -rf .venv .pytest_cache build dist *.egg-info

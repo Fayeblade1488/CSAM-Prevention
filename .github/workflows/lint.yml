@@ -1,0 +1,43 @@
+name: Lint
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+permissions:
+  contents: read
+jobs:
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        if: hashFiles('pyproject.toml') != ''
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python lint
+        if: hashFiles('pyproject.toml') != ''
+        run: |
+          pip install ruff mypy
+          ruff check .
+          ruff format --check .
+          mypy . || true
+  pre-commit:
+    name: Pre-commit hooks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run pre-commit
+        uses: pre-commit/action@v3.0.1
