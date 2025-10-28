@@ -1,5 +1,6 @@
 from csam_guard.guard import CSAMGuard, DEFAULT_CONFIG
 
+
 def test_text_core_paths():
     g = CSAMGuard(DEFAULT_CONFIG)
     assert not g.assess("A 15-year-old in school uniform").allow
