@@ -1,0 +1,14 @@
+# Set default line ending behavior
+* text=auto
+
+# Explicitly declare text files
+*.md text
+*.txt text
+*.py text
+*.json text
+*.yml text
+*.yaml text
+*.toml text
+*.ini text
+*.cfg text
+*.conf text

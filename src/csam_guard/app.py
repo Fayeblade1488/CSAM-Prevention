@@ -64,7 +64,7 @@ def check_rate_limit(request: Request):
         HTTPException: If the rate limit is exceeded.
     """
     trust_proxy = os.getenv("TRUST_XFF", "0") == "1"
-    user_id = request.client.host
+    user_id = request.client.host if request.client else "unknown"
     if trust_proxy:
         fwd = request.headers.get("x-forwarded-for")
         if fwd:
@@ -90,12 +90,27 @@ class PromptRequest(BaseModel):
 
 @app.post("/assess", dependencies=[Depends(check_rate_limit)])
 def assess_prompt(req: PromptRequest):
-    """Assesses a text prompt for potential CSAM-related content."""
+    """Assess a text prompt for potential CSAM-related content.
+
+    Args:
+        req: The request model containing the prompt and other options.
+
+    Returns:
+        A decision object with the assessment result.
+    """
     return app.state.guard.assess(req.prompt, req.do_fun_rewrite, verbose=req.verbose)
 
 @app.post("/assess_image", dependencies=[Depends(check_rate_limit)])
 async def assess_image_endpoint(request: Request, file: UploadFile = File(...)):
-    """Assesses an image for potential CSAM-related content."""
+    """Assess an image for potential CSAM-related content.
+
+    Args:
+        request: The incoming request.
+        file: The image file to assess.
+
+    Returns:
+        A decision object with the assessment result.
+    """
     if file.content_type not in ALLOWED_IMAGE_CT:
         raise HTTPException(status_code=415, detail="Unsupported media type")
     cl = request.headers.get("content-length")
