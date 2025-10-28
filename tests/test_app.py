@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from src.csam_guard.app import app
+from csam_guard.app import app
 
 @pytest.fixture
 def client():
