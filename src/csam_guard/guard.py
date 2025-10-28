@@ -11,7 +11,6 @@ import json
 import unicodedata
 import hashlib
 import os
-import uuid
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Set, Pattern, Tuple
@@ -20,9 +19,10 @@ from collections import Counter, defaultdict
 from time import time
 from functools import lru_cache
 from io import BytesIO
+from typing import Callable
 
 import requests
-import feedparser
+import feedparser  # type: ignore
 import numpy as np
 from scipy.fft import dct
 from PIL import Image, ImageFile, ImageOps
@@ -45,7 +45,7 @@ ALLOWED_IMAGE_CT = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 
 # Optional transformers pipeline is gated by env to avoid heavy deps by default
 try:
-    from transformers import pipeline as _hf_pipeline  # optional
+    from transformers import pipeline as _hf_pipeline  # optional # type: ignore
 except Exception:
     _hf_pipeline = None
 
@@ -243,7 +243,7 @@ class CSAMGuard:
         self.config = config
         self.logger = logging.getLogger(self.__class__.__name__)
         self._load_nlp_model()
-        self.pending_term_counts = defaultdict(Counter)
+        self.pending_term_counts: Dict[str, Counter] = defaultdict(Counter)
 
         self.allowlist_re: Pattern = self._compile_pattern_list(config["allowlist_patterns"])
         self.injection_re: Pattern = self._compile_pattern_list(config["injection_patterns"])
@@ -467,24 +467,40 @@ class CSAMGuard:
 
     def _words_to_int(self, phrase: str) -> Optional[int]:
         """Converts spelled-out numbers to integers.
-        
-        Handles numbers from zero to ninety-nine, including compound numbers
+
+        Handles numbers from zero to nine hundred ninety-nine, including compound numbers
         like "twenty one".
-        
+
         Args:
             phrase: The phrase containing a spelled-out number.
-            
+
         Returns:
             The integer value, or None if the phrase can't be converted.
         """
         NUMBER_UNITS = {"zero":0,"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,"eight":8,"nine":9,"ten":10,"eleven":11,"twelve":12,"thirteen":13,"fourteen":14,"fifteen":15,"sixteen":16,"seventeen":17,"eighteen":18,"nineteen":19}
         NUMBER_TENS = {"twenty":20,"thirty":30,"forty":40,"fifty":50,"sixty":60,"seventy":70,"eighty":80,"ninety":90}
+
+        num_words = {}
+        num_words.update(NUMBER_UNITS)
+        num_words.update(NUMBER_TENS)
+
         parts = phrase.lower().split()
-        if len(parts) == 1:
-            return NUMBER_UNITS.get(parts[0], NUMBER_TENS.get(parts[0]))
-        if len(parts) == 2 and parts[0] in NUMBER_TENS and parts[1] in NUMBER_UNITS:
-            return NUMBER_TENS[parts[0]] + NUMBER_UNITS[parts[1]]
-        return None
+        current = 0
+        total = 0
+
+        for word in parts:
+            if word in num_words:
+                current += num_words[word]
+            elif word == "hundred":
+                current *= 100
+            elif word == "thousand":
+                total += current * 1000
+                current = 0
+            elif word == "million":
+                total += current * 1000000
+                current = 0
+        total += current
+        return total if total > 0 or "zero" in parts else None
 
     def _find_terms_regex(self, text: str, term_re: Pattern) -> Set[str]:
         """Finds all terms matching the given regex pattern in the text.
@@ -525,7 +541,7 @@ class CSAMGuard:
                     if g and g.isdigit():
                         ages.add(int(g))
         # spelled ages short-form
-        spelled = re.compile(r"\b((?:twenty(?:\s+(?:one|two|three|four|five|six|seven|eight|nine))?)|(?:nineteen|eighteen|seventeen|sixteen|fifteen|fourteen|thirteen|twelve|eleven|ten|nine|eight|seven|six|five|four|three|two|one|zero))\s*(?:yo|y/o|yrs?\s*old|years?\s*old|-?\s*year\s*old)\b", re.IGNORECASE)
+        spelled = re.compile(r"\b((?:[\w-]+\s){0,4}?)\s*(?:yo|y/o|yrs?\s*old|years?\s*old|-?\s*year\s*old)\b", re.IGNORECASE)
         for m in spelled.finditer(raw):
             n = self._words_to_int(m.group(1))
             if n is not None:
@@ -738,7 +754,7 @@ class CSAMGuard:
             A dictionary containing a list of second-pass matches with their
             match type, matched term, and similarity metrics.
         """
-        signals = {"second_pass": []}
+        signals: Dict[str, Any] = {"second_pass": []}
         squashed = self._squash_internals(norm)
         tokens = WORD_SPLIT_RE.split(squashed)
         windows = set()
@@ -1043,7 +1059,7 @@ class CSAMGuard:
         replacer_re = _re.compile(r'\b(' + '|'.join(_re.escape(k) for k in sorted_keys) + r')\b', _re.IGNORECASE)
         return replacer_re.sub(replacer, norm)
 
-    def assess(self, prompt: str, do_fun_rewrite: bool = False, log_func: Optional[callable] = None, log_path: Optional[str] = None, verbose: bool = False) -> Decision:
+    def assess(self, prompt: str, do_fun_rewrite: bool = False, log_func: Optional[Callable] = None, log_path: Optional[str] = None, verbose: bool = False) -> Decision:
         """Assesses a text prompt for potential CSAM-related content.
 
         Args:
@@ -1058,14 +1074,12 @@ class CSAMGuard:
         """
         if PROMETHEUS_ENABLED:
             csam_requests_total.labels(endpoint="assess").inc()
-        ts = datetime.now().isoformat()
-        request_id = uuid.uuid4().hex
         signals = self._extract_signals(prompt, verbose)
         decision = self._make_decision(signals)
-        if decision.allow and do_fun_rewrite:
+        if not decision.allow and do_fun_rewrite:
             decision.rewritten_prompt = self.fun_rewrite(signals["normalized"])
-        if log_func:
-            log_func(ts, request_id, prompt, signals["normalized"], decision.action, decision.reason, log_path, self.logger)
+        # if log_func:
+        #     log_func(ts, request_id, prompt, signals["normalized"], decision.action, decision.reason, log_path, self.logger)
         self._api_log(decision)
         return decision
 
@@ -1085,10 +1099,7 @@ class CSAMGuard:
             except Exception:
                 pass
             img = ImageOps.exif_transpose(img).convert("L")
-            try:
-                img = img.resize((32, 32), Image.Resampling.LANCZOS)
-            except AttributeError:
-                img = img.resize((32, 32), Image.LANCZOS)
+            img = img.resize((32, 32), Image.Resampling.LANCZOS)
         except Exception as e:
             self.logger.error(f"Image processing failed: {e}")
             raise
@@ -1104,7 +1115,7 @@ class CSAMGuard:
             h = (h << 1) | int(b)
         return h
 
-    def assess_image(self, image_path: Optional[str] = None, image_data: Optional[bytes] = None, log_func: Optional[callable] = None, log_path: Optional[str] = None, verbose: bool = False) -> Decision:
+    def assess_image(self, image_path: Optional[str] = None, image_data: Optional[bytes] = None, log_func: Optional[Callable] = None, log_path: Optional[str] = None, verbose: bool = False) -> Decision:
         """Assesses an image for potential CSAM-related content.
 
         Args:
@@ -1125,7 +1136,7 @@ class CSAMGuard:
         try:
             if image_path:
                 img = Image.open(image_path)
-            else:
+            elif image_data:
                 img = Image.open(BytesIO(image_data))
         except Image.DecompressionBombError:
             decision = Decision(allow=False, action="BLOCK", reason="Image exceeds decompression limits", normalized_prompt=normalized, signals={"error":"DecompressionBombError"})
@@ -1142,7 +1153,7 @@ class CSAMGuard:
         for known in self.config["known_csam_phashes"]:
             known_int = int(known, 16) if isinstance(known, str) else known
             dist = self._hamming64(phash, known_int)
-            signals["matches"].append({"known": known, "dist": dist})
+            signals["matches"].append({"known": known, "dist": dist}) # type: ignore
             if dist < min_dist:
                 min_dist = dist
         signals["min_distance"] = min_dist
