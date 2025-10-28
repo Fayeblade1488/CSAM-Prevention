@@ -1,8 +1,15 @@
-name: Security
+# This workflow uses the default-compatible CodeQL configuration.
+# Advanced custom queries have been removed to avoid conflicts with the repository's
+# default CodeQL setup. If you need advanced queries, disable the default setup in
+# Repository Settings → Security → Code scanning alerts.
+
+name: Security Scanning
+
 on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
   schedule:
     - cron: "0 3 * * 1"  # Weekly Monday 3am UTC
 
@@ -10,14 +17,15 @@ permissions:
   contents: read
   security-events: write
   actions: read
+  id-token: write
 
 jobs:
   gitleaks:
     name: Gitleaks Secret Scan
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -30,22 +38,25 @@ jobs:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         language: [python]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v5
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@v4
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
 
   scorecard:
     name: OpenSSF Scorecard
@@ -55,19 +66,19 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
 
       - name: Run analysis
-        uses: ossf/scorecard-action@v2.3.1
+        uses: ossf/scorecard-action@v2.4.0
         with:
           results_file: results.sarif
           results_format: sarif
           publish_results: true
 
       - name: Upload SARIF results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: results.sarif
