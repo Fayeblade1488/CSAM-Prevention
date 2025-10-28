@@ -4,6 +4,8 @@ on:
     branches: [main, develop]
   pull_request:
 
+permissions:
+  contents: read
 jobs:
   lint:
     name: Lint and Format Check
