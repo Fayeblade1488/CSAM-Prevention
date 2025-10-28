@@ -8,3 +8,6 @@ def test_text_core_paths():
     d = g.assess("twenty five year old")
     assert 25 in d.signals["ages"]
     assert d.allow
+    d = g.assess("one hundred year old")
+    assert 100 in d.signals["ages"]
+    assert d.allow
