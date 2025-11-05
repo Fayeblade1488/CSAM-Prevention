@@ -131,14 +131,14 @@ async def assess_image_endpoint(request: Request, file: UploadFile = File(...)):
     cl = request.headers.get("content-length")
     if cl is not None and int(cl) > app.state.max_upload_size:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail="File too large",
         )
     cap = app.state.max_upload_size + 1
     content = await file.read(cap)
     if len(content) > app.state.max_upload_size:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail="File too large",
         )
     return app.state.guard.assess_image(image_data=content)

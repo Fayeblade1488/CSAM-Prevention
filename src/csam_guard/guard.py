@@ -14,7 +14,7 @@ import hashlib
 import os
 import logging
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional, Set, Pattern, Tuple
+from typing import List, Dict, Any, Optional, Set, Pattern, Tuple, DefaultDict
 from dataclasses import dataclass, asdict, field
 from collections import Counter, defaultdict
 from time import time
@@ -471,7 +471,7 @@ class RateLimiter:
         """
         from threading import Lock
 
-        self.requests = defaultdict(list)
+        self.requests: DefaultDict[str, List[float]] = defaultdict(list)
         self.max_requests = max_requests
         self.window = window
         self.lock = Lock()
