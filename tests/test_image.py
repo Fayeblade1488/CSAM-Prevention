@@ -1,7 +1,6 @@
 import base64
 from csam_guard.guard import CSAMGuard, DEFAULT_CONFIG
 
-
 def test_image_paths():
     g = CSAMGuard(DEFAULT_CONFIG)
     mock_safe_image = base64.b64decode(

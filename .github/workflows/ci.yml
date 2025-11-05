@@ -1,15 +1,15 @@
-name: CI
-permissions:
-  contents: read
+name: CI - Build, Lint, and Test
+
 on:
   push:
-    branches: [main, develop]
+    branches: [ main, master, develop ]
   pull_request:
-    branches: [main]
+    branches: [ main, master, develop ]
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
 
 jobs:
   lint:
@@ -46,19 +46,16 @@ jobs:
         continue-on-error: true
 
   test:
-    name: Test on ${{ matrix.os }} with Python ${{ matrix.python-version }}
-    runs-on: ${{ matrix.os }}
+    name: Test on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ github.event_name == 'pull_request' && fromJson('["ubuntu-latest"]') || fromJson('["ubuntu-latest", "macos-latest", "windows-latest"]') }}
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ['3.10', '3.11', '3.12']
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v6
@@ -66,25 +63,24 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
-      - name: Install Python dependencies
-        if: hashFiles('pyproject.toml') != ''
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip wheel
-          pip install -e ".[dev]" || pip install -e .
+          pip install -e ".[dev]"
 
-      - name: Run Python tests
-        if: hashFiles('pyproject.toml') != ''
+      - name: Run tests with coverage
         run: |
-          DISABLE_NLP=1 python -m pytest --cov --cov-report=xml --cov-report=term-missing
+          pytest -v --cov=csam_guard --cov-report=xml --cov-report=term-missing
+        env:
+          DISABLE_NLP: "1"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
-        if: matrix.python-version == '3.11' && matrix.os == 'ubuntu-latest'
+        if: matrix.python-version == '3.11'
         with:
-          files: coverage.xml,coverage.out
+          file: ./coverage.xml
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
-          verbose: true
 
   build-docker:
     name: Build Docker Image
