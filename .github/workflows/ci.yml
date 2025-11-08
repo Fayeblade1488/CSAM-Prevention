@@ -74,8 +74,9 @@ jobs:
 
       - name: Run Python tests
         if: hashFiles('pyproject.toml') != ''
-        run: |
-          DISABLE_NLP=1 python -m pytest --cov --cov-report=xml --cov-report=term-missing
+        run: python -m pytest --cov --cov-report=xml --cov-report=term-missing
+        env:
+          DISABLE_NLP: 1
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

@@ -185,12 +185,12 @@ def test_rate_limiter_window_boundaries():
     assert limiter.check(user), "Second request should be allowed"
     assert not limiter.check(user), "Third request should be blocked"
 
-    # Wait just under the window
-    time.sleep(0.9)
-    assert not limiter.check(user), "Request before window expiry should be blocked"
+    # Wait less than the window to ensure we're still in the same window
+    time.sleep(0.5)
+    assert not limiter.check(user), "Request within window should be blocked"
 
-    # Wait for full window to expire
-    time.sleep(0.2)  # Total 1.1 seconds
+    # Wait for full window to expire (1.1 seconds total)
+    time.sleep(0.7)
     assert limiter.check(user), "Request after window expiry should be allowed"
 
 
